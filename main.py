@@ -17,6 +17,18 @@ BASE_DIR = Path(__file__).resolve().parent
 DATA_DIR = BASE_DIR / "data"
 MISSED_FILE = BASE_DIR / "missed_quiz.txt"
 UNKNOWN_TOPIC_FILE = BASE_DIR / "unknown_topics.txt"
+TOPIC_COLORS = [
+    "#FDE68A",
+    "#BFDBFE",
+    "#C7D2FE",
+    "#A7F3D0",
+    "#FBCFE8",
+    "#DDD6FE",
+    "#FED7AA",
+    "#BBF7D0",
+    "#F5D0FE",
+    "#FEF3C7",
+]
 
 
 def get_choseong(text: str) -> str:
@@ -197,6 +209,8 @@ class QuizHelperApp:
         self.root.attributes("-topmost", True)
 
         self.results: list[tuple[str, str, str]] = []
+        self.topic_colors: dict[str, str] = {}
+        self.input_trace_id: str | None = None
 
         self.input_var = tk.StringVar()
         self.status_var = tk.StringVar(value="예: ㅍㄹㅌ 가전제품 또는 ㅍㄹㅌ")
@@ -217,7 +231,7 @@ class QuizHelperApp:
         button_row = tk.Frame(frame)
         button_row.pack(fill="x", pady=(0, 8))
 
-        tk.Button(button_row, text="검색", command=self.search).pack(side="left")
+        tk.Button(button_row, text="검색", command=self.search_from_button).pack(side="left")
         tk.Button(button_row, text="지우기", command=self.clear_input).pack(side="left", padx=(6, 0))
         tk.Button(button_row, text="창 숨기기", command=self.hide_window).pack(side="right")
 
@@ -247,12 +261,17 @@ class QuizHelperApp:
 
     def bind_events(self) -> None:
         self.input_entry.bind("<Return>", self.handle_input_enter)
+        self.result_listbox.bind("<<ListboxSelect>>", self.handle_result_select)
         self.result_listbox.bind("<Double-Button-1>", lambda _event: self.copy_selected_answer())
         self.result_listbox.bind("<Return>", lambda _event: self.copy_selected_answer())
         self.add_answer_entry.bind("<Return>", lambda _event: self.add_answer())
+        self.input_trace_id = self.input_var.trace_add("write", self.handle_input_change)
+
+    def handle_input_change(self, *_args: str) -> None:
+        self.search()
 
     def handle_input_enter(self, _event: tk.Event) -> None:
-        self.search()
+        self.search(move_focus_on_no_results=True)
 
         if self.results:
             self.result_listbox.selection_clear(0, tk.END)
@@ -260,8 +279,23 @@ class QuizHelperApp:
             self.result_listbox.activate(0)
             self.result_listbox.focus_set()
 
-    def search(self) -> None:
-        parsed = parse_input(self.input_var.get())
+    def handle_result_select(self, _event: tk.Event) -> None:
+        if self.result_listbox.curselection():
+            self.copy_selected_answer()
+
+    def search_from_button(self) -> None:
+        self.search(move_focus_on_no_results=True)
+
+    def search(self, move_focus_on_no_results: bool = False) -> None:
+        raw_input = self.input_var.get().strip()
+
+        if not raw_input:
+            self.results = []
+            self.refresh_results()
+            self.status_var.set("예: ㅍㄹㅌ 가전제품 또는 ㅍㄹㅌ")
+            return
+
+        parsed = parse_input(raw_input)
 
         if not parsed:
             self.results = []
@@ -282,16 +316,30 @@ class QuizHelperApp:
         else:
             self.status_var.set(f"{status} | 아래에서 직접 정답 추가 가능")
             self.add_answer_var.set("")
-            self.add_answer_entry.focus_set()
+            if move_focus_on_no_results:
+                self.add_answer_entry.focus_set()
 
     def refresh_results(self) -> None:
         self.result_listbox.delete(0, tk.END)
 
-        for found_topic, answer, match_type in self.results:
+        for index, (found_topic, answer, match_type) in enumerate(self.results):
             self.result_listbox.insert(
                 tk.END,
                 f"[{match_type}] [{found_topic}] {answer} ({get_choseong(answer)})",
             )
+            self.result_listbox.itemconfig(
+                index,
+                bg=self.get_topic_color(found_topic),
+                fg="#0F172A" if match_type == "완전일치" else "#475569",
+                selectbackground="#2563EB",
+                selectforeground="#FFFFFF",
+            )
+
+    def get_topic_color(self, topic: str) -> str:
+        if topic not in self.topic_colors:
+            self.topic_colors[topic] = TOPIC_COLORS[len(self.topic_colors) % len(TOPIC_COLORS)]
+
+        return self.topic_colors[topic]
 
     def copy_selected_answer(self) -> None:
         if not self.results:
@@ -322,7 +370,13 @@ class QuizHelperApp:
         messagebox.showinfo("정답 추가", message)
 
     def clear_input(self) -> None:
+        if self.input_trace_id:
+            self.input_var.trace_remove("write", self.input_trace_id)
+            self.input_trace_id = None
+
         self.input_var.set("")
+
+        self.input_trace_id = self.input_var.trace_add("write", self.handle_input_change)
         self.status_var.set("예: ㅍㄹㅌ 가전제품 또는 ㅍㄹㅌ")
         self.results = []
         self.refresh_results()
